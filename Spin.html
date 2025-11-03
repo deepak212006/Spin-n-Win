@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>The Diivine Opticians — Spin & Win</title>
+<style>
+  :root { --size: min(68vw, 510px); } /* ~15% smaller */
+  body {
+    margin:0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background-color:#f5f5dc;
+    /* colorful optical repeating pattern - replace the URL if you want your own */
+    background-image: url('https://i.imgur.com/mE5e3hw.png');
+    background-repeat: repeat;
+    background-size: 200px 200px;
+    color:#0b2545;
+    overflow:hidden;
+  }
+
+  .card {
+    width: calc(var(--size) + 60px);
+    background: #fff;
+    border-radius:18px;
+    padding:20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+    text-align:center;
+  }
+
+  h1 { margin: 0 0 6px 0; font-size:1.6rem; }
+  h2 { margin:0 0 16px 0; font-size:1rem; color:#345; font-weight:600; }
+
+  .wheel-wrap { position:relative; display:flex; align-items:center; justify-content:center; }
+  canvas#wheel { width: var(--size); height: var(--size); border-radius:50%; display:block; background:transparent; }
+  .pointer { position:absolute; top:6%; left:50%; transform:translateX(-50%); pointer-events:none; z-index:3; }
+  .pointer::after{
+    content:'';
+    display:block;
+    width:0;height:0;
+    border-left:14px solid transparent;
+    border-right:14px solid transparent;
+    border-bottom:28px solid #ff3b30;
+    filter: drop-shadow(0 2px 2px rgba(0,0,0,0.15));
+  }
+
+  .controls { margin-top:14px; display:flex; gap:12px; justify-content:center; align-items:center; }
+  button { background: linear-gradient(135deg,#0b2545,#1d4f91); color:#fff; border:0; padding:12px 18px; border-radius:10px; font-weight:700; cursor:pointer; box-shadow:0 6px 14px rgba(13,38,72,0.12); }
+  button:disabled { opacity:0.5; cursor:not-allowed; }
+
+  .small { margin-top:12px; font-size:13px; color:#2b4a6f; }
+  #result { margin-top:10px; font-weight:600; color:#0b2545; }
+
+  .flash-card {
+    position: fixed;
+    top:50%;
+    left:50%;
+    transform: translate(-50%,-50%) scale(0.9);
+    background:#fff;
+    padding:24px 34px;
+    border-radius:14px;
+    box-shadow:0 12px 40px rgba(0,0,0,0.25);
+    font-weight:700;
+    z-index:40;
+    opacity:0;
+    transition:opacity .28s ease, transform .28s ease;
+    min-width:260px;
+    text-align:center;
+  }
+  .flash-card.show { opacity:1; transform: translate(-50%,-50%) scale(1); }
+  .flash-card small { display:block; margin-top:10px; font-weight:400; font-size:0.9rem; font-style:italic; color:#333; }
+
+  canvas#confetti { position:fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:30; }
+
+  @media (max-width:420px){ :root { --size: 272px; } .card { width: calc(var(--size) + 40px); padding:12px; } .flash-card{ padding:18px 20px; } }
+</style>
+</head>
+<body>
+  <main class="card" role="main" aria-labelledby="title">
+    <h1 id="title">The Diivine Opticians</h1>
+    <h2>Spin the Wheel & Win</h2>
+
+    <div class="wheel-wrap">
+      <canvas id="wheel" aria-label="Prize wheel"></canvas>
+      <div class="pointer" aria-hidden="true"></div>
+    </div>
+
+    <div class="controls">
+      <button id="spinBtn">🎯 Spin</button>
+      <button id="resetBtn">🔄 Reset</button>
+    </div>
+
+    <p class="small">Click <strong>Spin</strong> — the wheel will rotate several rounds and stop on a prize.</p>
+    <div id="result">Good luck!</div>
+  </main>
+
+  <div id="flashCard" class="flash-card" role="status" aria-live="polite"></div>
+  <canvas id="confetti"></canvas>
+  <audio id="winSound" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_cff1b6de8d.mp3?filename=success-1-6297.mp3"></audio>
+
+<script>
+(function(){
+  // Labels and T&C
+  const labels = [
+    '10% OFF',
+    'Free BluBlok Lens',
+    '₹500 Voucher',
+    'Buy 1 Get 50% OFF',
+    '20% OFF',
+    'Free Frame',
+    'Grand Prize',
+    'Try Again'
+  ];
+
+  const tcs = {
+    '10% OFF': 'T&C - On shopping of ₹2000 and above',
+    'Free BluBlok Lens': 'T&C - On shopping of ₹2000 and above',
+    '₹500 Voucher': 'T&C - Applicable on shopping of ₹2500 and above',
+    'Buy 1 Get 50% OFF': 'T&C - Applicable on shopping of ₹2000 and above on second frame',
+    '20% OFF': 'T&C - On shopping of ₹2500 and above',
+    'Free Frame': 'T&C - On shopping of ₹2500 and above'
+  };
+
+  const grandPrizes = [
+    "35% OFF on Crizal Lenses",
+    "25% OFF on Ray-Ban Frame",
+    "20% OFF on Ray-Ban Sunglass",
+    "25% OFF on Calvin Klein",
+    "25% OFF on Tommy Hilfiger",
+    "20% OFF on Varilux"
+  ];
+
+  // Elements
+  const canvas = document.getElementById('wheel');
+  const ctx = canvas.getContext('2d');
+  const confettiCanvas = document.getElementById('confetti');
+  const confettiCtx = confettiCanvas.getContext('2d');
+  const flashCard = document.getElementById('flashCard');
+  const spinBtn = document.getElementById('spinBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const resultEl = document.getElementById('result');
+  const winSound = document.getElementById('winSound');
+
+  // Drawing config
+  let DPR = window.devicePixelRatio || 1;
+  function resizeCanvas() {
+    // set displayed size using CSS var
+    const style = getComputedStyle(canvas);
+    const dispW = parseFloat(style.width);
+    const dispH = parseFloat(style.height);
+    canvas.width = Math.round(dispW * DPR);
+    canvas.height = Math.round(dispH * DPR);
+    canvas.style.width = style.width;
+    canvas.style.height = style.height;
+
+    confettiCanvas.width = Math.round(window.innerWidth * DPR);
+    confettiCanvas.height = Math.round(window.innerHeight * DPR);
+    confettiCanvas.style.width = window.innerWidth + 'px';
+    confettiCanvas.style.height = window.innerHeight + 'px';
+
+    // scale context for crisp drawing
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    confettiCtx.setTransform(DPR,0,0,DPR,0,0);
+
+    drawWheel();
+  }
+
+  // wheel geometry computed dynamically
+  function getWheelMetrics(){
+    const dispW = canvas.clientWidth;
+    const size = Math.min(dispW, canvas.clientHeight);
+    const cx = dispW/2;
+    const cy = canvas.clientHeight/2;
+    const radius = Math.min(dispW, canvas.clientHeight) / 2 - 6;
+    return { cx, cy, radius };
+  }
+
+  // Colors
+  function getColor(i, n){
+    return `hsl(${i * (360/n)}, 70%, 55%)`;
+  }
+
+  // state
+  const N = labels.length;
+  let rotation = 0; // radians
+  let isSpinning = false;
+
+  // draw wheel
+  function drawWheel(){
+    // clear
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    ctx.clearRect(0,0,w,h);
+
+    const { cx, cy, radius } = getWheelMetrics();
+    const segAngle = 2*Math.PI / N;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 2;
+
+    for(let i=0;i<N;i++){
+      const start = rotation + i*segAngle;
+      const end = start + segAngle;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, radius, start, end);
+      ctx.closePath();
+      ctx.fillStyle = getColor(i,N);
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+
+      // label
+      ctx.save();
+      const mid = start + segAngle/2;
+      const textR = radius*0.66;
+      const x = cx + Math.cos(mid) * textR;
+      const y = cy + Math.sin(mid) * textR;
+      ctx.translate(x, y);
+      ctx.rotate(mid + Math.PI/2);
+      ctx.fillStyle = '#07203a';
+      ctx.font = 'bold 16px system-ui, sans-serif';
+      wrapText(ctx, labels[i], 0, 0, segAngle * textR * 0.9, 16);
+      ctx.restore();
+    }
+
+    // outer ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius+3, 0, Math.PI*2);
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#e6eef8';
+    ctx.stroke();
+
+    // center
+    ctx.beginPath();
+    ctx.fillStyle = '#fff';
+    ctx.arc(cx, cy, 56, 0, Math.PI*2);
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#d7e6fb';
+    ctx.stroke();
+
+    ctx.fillStyle = '#0b2545';
+    ctx.font = '600 14px system-ui, sans-serif';
+    ctx.fillText('Tap to Spin', cx, cy);
+  }
+
+  // text wrapping helper
+  function wrapText(context, text, x, y, maxWidth, lineHeight){
+    const words = text.split(' ');
+    let line = '';
+    const lines = [];
+    for(let n=0;n<words.length;n++){
+      const test = line + words[n] + ' ';
+      if(context.measureText(test).width > maxWidth && n>0){
+        lines.push(line.trim());
+        line = words[n] + ' ';
+      } else {
+        line = test;
+      }
+    }
+    lines.push(line.trim());
+    const total = lines.length * lineHeight;
+    let startY = y - total/2 + lineHeight/2;
+    for(let i=0;i<lines.length;i++){
+      context.fillText(lines[i], x, startY + i*lineHeight);
+    }
+  }
+
+  // easing
+  function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+
+  // spin to index function (deterministic index)
+  function spinToIndex(index){
+    if(isSpinning) return;
+    isSpinning = true;
+    spinBtn.disabled = true;
+    resetBtn.disabled = true;
+
+    const segAngle = 2*Math.PI / N;
+    const fullRot = Math.floor(Math.random()*4) + 5; // 5..8 turns
+    const target = (N - index) * segAngle - segAngle/2;
+    const curNorm = (rotation % (2*Math.PI) + 2*Math.PI) % (2*Math.PI);
+    const desired = -Math.PI/2 - target;
+    const final = desired + fullRot * 2*Math.PI;
+    let delta = final - curNorm;
+    if(delta < 0) delta += 2*Math.PI;
+
+    const duration = 6000 + Math.random()*2000; // 6-8s
+    const start = performance.now();
+    const startRot = rotation;
+
+    function frame(now){
+      const elapsed = now - start;
+      const t = Math.min(1, elapsed / duration);
+      const eased = easeOutCubic(t);
+      rotation = startRot + delta * eased;
+      drawWheel();
+      if(t < 1){
+        requestAnimationFrame(frame);
+      } else {
+        isSpinning = false;
+        spinBtn.disabled = false;
+        resetBtn.disabled = false;
+        // determine landed index exactly
+        const landedAngle = (rotation + Math.PI/2) % (2*Math.PI);
+        let landedIndex = Math.floor((N - (landedAngle / segAngle)) % N);
+        landedIndex = (landedIndex + N) % N;
+        const prize = labels[landedIndex];
+        resultEl.textContent = `You won: ${prize}`;
+        showFlash(prize);
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // weighted pick to make Grand Prize rare
+  function spinRandomWeighted(){
+    // Weighted indices: fewer 7s (Grand Prize index)
+    // indexes: 0..7
+    const weighted = [0,0,0,1,1,2,2,3,4,4,5,5,6,6,7];
+    const idx = weighted[Math.floor(Math.random() * weighted.length)];
+    spinToIndex(idx);
+  }
+
+  // show flash card and special handling
+  function showFlash(prize){
+    let content = prize;
+    if(prize === 'Grand Prize'){
+      const rand = grandPrizes[Math.floor(Math.random()*grandPrizes.length)];
+      content = `<strong>${rand}</strong><small>T&C - Applicable on shopping of ₹2500 and above</small>`;
+    } else if(tcs[prize]){
+      content += `<small>${tcs[prize]}</small>`;
+    } // 'Try Again' will just show the label
+
+    flashCard.innerHTML = content;
+    flashCard.classList.add('show');
+
+    // confetti and sound for all except Try Again
+    if(prize !== 'Try Again'){
+      triggerConfetti();
+      try { winSound.currentTime = 0; winSound.play(); } catch(e) {}
+    }
+
+    // auto hide
+    setTimeout(()=> flashCard.classList.remove('show'), 3600);
+  }
+
+  // confetti implementation (canvas)
+  let confettiParticles = [];
+  function triggerConfetti(){
+    const W = confettiCanvas.width / (window.devicePixelRatio || 1);
+    const H = confettiCanvas.height / (window.devicePixelRatio || 1);
+    confettiParticles = Array.from({length:140}, ()=>({
+      x: Math.random()*W,
+      y: Math.random()*-H,
+      vx: (Math.random()-0.5)*3,
+      vy: Math.random()*2 + 2,
+      size: Math.random()*6 + 4,
+      color: `hsl(${Math.random()*360}, 90%, 60%)`,
+      rot: Math.random()*360
+    }));
+    requestAnimationFrame(confettiLoop);
+    setTimeout(()=> confettiParticles = [], 3600);
+  }
+  function confettiLoop(){
+    const ctxC = confettiCtx;
+    const W = confettiCanvas.width / (window.devicePixelRatio || 1);
+    const H = confettiCanvas.height / (window.devicePixelRatio || 1);
+    ctxC.clearRect(0,0,W,H);
+    for(let p of confettiParticles){
+      ctxC.save();
+      ctxC.fillStyle = p.color;
+      ctxC.translate(p.x, p.y);
+      ctxC.rotate(p.rot * Math.PI/180);
+      ctxC.fillRect(-p.size/2, -p.size/2, p.size, p.size);
+      ctxC.restore();
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.03;
+      p.rot += 3;
+      if(p.y > H + 10) p.y = -20;
+    }
+    if(confettiParticles.length) requestAnimationFrame(confettiLoop);
+  }
+
+  // event bindings
+  spinBtn.addEventListener('click', ()=> spinRandomWeighted());
+  resetBtn.addEventListener('click', ()=>{
+    rotation = 0; drawWheel(); resultEl.textContent = 'Good luck!';
+  });
+
+  // keyboard accessibility
+  canvas.tabIndex = 0;
+  canvas.addEventListener('keydown', e => {
+    if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); spinRandomWeighted(); }
+  });
+
+  // responsive setup
+  window.addEventListener('resize', ()=> {
+    resizeCanvas();
+  });
+
+  // initial sizes + draw
+  // set CSS size of canvas to var(--size) so clientWidth matches
+  canvas.style.width = getComputedStyle(document.documentElement).getPropertyValue('--size') || '400px';
+  canvas.style.height = canvas.style.width;
+  resizeCanvas();
+
+  // initial draw
+  drawWheel();
+
+})(); // end IIFE
+</script>
+</body>
+</html>
